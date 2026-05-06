@@ -1,0 +1,35 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      num-instances:
+        description: 'Number of instances'
+        required: true
+        default: '1'
+      start-index:
+        description: 'Starting instance number in series'
+        required: false
+        default: '1'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: deepsee-code/dstack-deploy-action@main
+        with:
+          dstack-token: ${{ secrets.DSTACK_TOKEN }}
+          num-instances: ${{ github.event.inputs.num-instances }}
+          prefix: ai-gen-text-classifier
+          start-index: ${{ github.event.inputs.start-index }}
+        env:
+          AIGT_HF_TOKEN: ${{ secrets.AIGT_HF_TOKEN }}
+          BATCH_SIZE: ${{ secrets.BATCH_SIZE }}
+          QUEUE_API_KEY: ${{ secrets.QUEUE_API_KEY }}
+          QUEUE_URL: ${{ secrets.QUEUE_URL }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_FILE_PREFIX: ${{ secrets.S3_FILE_PREFIX }}
