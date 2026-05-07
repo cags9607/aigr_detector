@@ -21,10 +21,11 @@ class TextInferConfig:
     # Runtime knobs
     device: str = "cuda"
     cache_policy: str = "unload_after_call"
-    max_len: int = 512
+    max_len: int = 500
     batch_size: int = 16
     window_ai_threshold: float = 0.5
     prefer_bf16: bool = True
+    min_words: int = 10
 
 
 class TextClassifier:
@@ -96,6 +97,12 @@ class TextClassifier:
             return ""
         return str(x).strip()
 
+    def _count_words(self, text: Any) -> int:
+        text = self._coerce_text(text)
+        if not text:
+            return 0
+        return len(text.split())
+
     def _coerce_lang(self, x: Any) -> str:
         if x is None or pd.isna(x):
             return "en"
@@ -128,6 +135,7 @@ class TextClassifier:
         from aigt import WindowConfig, BatchConfig
 
         clean_texts = [self._coerce_text(t) for t in texts]
+        word_counts = [self._count_words(t) for t in clean_texts]
         n = len(clean_texts)
 
         if langs is None:
@@ -151,20 +159,42 @@ class TextClassifier:
             )
 
         try:
-            window_cfg = WindowConfig(token_length = int(self.cfg.max_len))
-            batch_cfg = BatchConfig(
-                batch_size = int(self.cfg.batch_size),
-                show_progress = False,
-            )
+            min_words = int(self.cfg.min_words)
+            eligible_mask = [wc >= min_words for wc in word_counts]
 
-            articles_df, windows_df = self._detector.predict(
-                texts = clean_texts,
-                doc_ids = list(prediction_ids_list),
-                lang = list(langs_list),
-                window = window_cfg,
-                batch = batch_cfg,
-                window_ai_threshold = float(self.cfg.window_ai_threshold),
-            )
+            model_texts = [
+                text for text, keep in zip(clean_texts, eligible_mask)
+                if keep
+            ]
+
+            model_prediction_ids = [
+                pid for pid, keep in zip(prediction_ids_list, eligible_mask)
+                if keep
+            ]
+
+            model_langs = [
+                lang for lang, keep in zip(langs_list, eligible_mask)
+                if keep
+            ]
+
+            if model_texts:
+                window_cfg = WindowConfig(token_length = int(self.cfg.max_len))
+                batch_cfg = BatchConfig(
+                    batch_size = int(self.cfg.batch_size),
+                    show_progress = False,
+                )
+
+                articles_df, windows_df = self._detector.predict(
+                    texts = model_texts,
+                    doc_ids = list(model_prediction_ids),
+                    lang = list(model_langs),
+                    window = window_cfg,
+                    batch = batch_cfg,
+                    window_ai_threshold = float(self.cfg.window_ai_threshold),
+                )
+            else:
+                articles_df = pd.DataFrame()
+                windows_df = pd.DataFrame()
 
             if articles_df is None:
                 articles_df = pd.DataFrame()
@@ -220,6 +250,24 @@ class TextClassifier:
 
             for i, pid in enumerate(prediction_ids_list):
                 requested_lang = langs_list[i]
+
+                if not eligible_mask[i]:
+                    out.append({
+                        "status": "skipped_short_text",
+                        "prediction_id": pid,
+                        "lang": requested_lang,
+                        "prediction_short": None,
+                        "prediction_long": None,
+                        "fraction_ai": None,
+                        "ai_probability": None,
+                        "human_probability": None,
+                        "n_windows": 0,
+                        "n_ai_segments": 0,
+                        "n_human_segments": 0,
+                        "n_tokens": 0,
+                    })
+                    continue
+
                 r = articles_by_pid.get(pid)
 
                 if r is None:
@@ -348,4 +396,5 @@ class TextClassifier:
             "batch_size": self.cfg.batch_size,
             "window_ai_threshold": self.cfg.window_ai_threshold,
             "prefer_bf16": self.cfg.prefer_bf16,
+            "min_words": self.cfg.min_words,
         }
